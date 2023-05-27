@@ -10,14 +10,19 @@
 #include <thread>
 #include <vector>
 #include "common.h"
+#include "hash_table.hpp"
 
 #define MAX_CLIENTS 10
 
 class Server {
+private:
+    HashTable *hashtable;
 
 public:
-    std::unordered_map<int, std::unordered_map<int, int>> hashTables_;
-    std::shared_mutex mutex_;
+    Server(int tableSize) {
+        this->hashtable = new HashTable(tableSize);
+    }
+    
     void processRequest(const Request& request, Response& response, int clientId) {
         switch (request.operation) {
             case 'I':
@@ -35,19 +40,18 @@ public:
     }
 
     void insert(int key, int value, Response& response, int clientId) {
-        std::unique_lock<std::shared_mutex> lock(mutex_);
-        hashTables_[clientId][key] = value;
+
+        hashtable->insert(key, value);
         std::cout << "Client " << clientId << " inserted (" << key << ", " << value << ")" << std::endl;
         response.success = true;
     }
 
     void get(int key, Response& response, int clientId) {
-        std::shared_lock<std::shared_mutex> lock(mutex_);
-        auto& hashTable = hashTables_[clientId];
-        auto it = hashTable.find(key);
-        if (it != hashTable.end()) {
+        std::cout << "Client " << clientId << " get key: " << key << std::endl;
+        std::pair<bool, int> result = hashtable->get(key);
+        if (result.first) {
             response.key = key;
-            response.value = it->second;
+            response.value = result.second;
             response.success = true;
         } else {
             response.success = false;
@@ -55,11 +59,9 @@ public:
     }
 
     void remove(int key, Response& response, int clientId) {
-        std::unique_lock<std::shared_mutex> lock(mutex_);
-        auto& hashTable = hashTables_[clientId];
-        auto it = hashTable.find(key);
-        if (it != hashTable.end()) {
-            hashTable.erase(it);
+
+        bool result = hashtable->remove(key);
+        if (result) {
             std::cout << "Client " << clientId << " deleted key: " << key << std::endl;
             response.success = true;
         } else {
@@ -80,35 +82,31 @@ int main(int argc, char* argv[]) {
     std::vector<int> shmids;
     std::vector<char*> shmaddrs;
 
-    key_t key = ftok("shmfile", 65);
-
-    Server server;
+    Server server = Server(tableSize);
     std::vector<std::thread> clientThreads;
+
+    std::cout << "Server started. Initiating client threads..." << std::endl;
     
-
-    for (int clientId = 0; clientId < MAX_CLIENTS; ++clientId) {
-        int shmid = shmget(key + clientId, SHM_SIZE, IPC_CREAT | 0666);
+    for (int clientId = 1; clientId <= MAX_CLIENTS; clientId++) {
+        int shmid = shmget(clientId, SHM_SIZE, IPC_CREAT | 0666);
         char* shmaddr = (char*)shmat(shmid, (void*)0, 0);
-        //td::memset(shmaddr, 0, sizeof(Request)+sizeof(Response));
-
+        std::memset(shmaddr, 0, SHM_SIZE);
         shmids.push_back(shmid);
         shmaddrs.push_back(shmaddr);
 
         std::thread clientThread([&server, shmaddr, clientId]() {
             while (true) {
-                if (shmaddr[0] != '\0') {
-                    Request request;
-                    memcpy(&request, shmaddr, sizeof(Request));
-
+                Request request;
+                memcpy(&request, shmaddr, sizeof(Request));
+                if(request.updated) {
                     Response response;
-                    std::cout << "process request: "<< request.operation << std::endl;
                     server.processRequest(request, response, clientId);
-                    std::cout << "sending response: "<< response.success << std::endl;
-
+                    response.updated = true;
+                    std::string output = response.success ? "successfull operation" : "failed operation";
+                    std::cout << "sending response: " << output << " to client " << clientId << std::endl;
                     memcpy(shmaddr + sizeof(Request), &response, sizeof(Response));
                     std::memset(shmaddr, 0, sizeof(Request));
                 }
-
                 sleep(1);
             }
         });

@@ -24,6 +24,8 @@ private:
     }
 
 public:
+
+    HashTable() {}
     // Constructor
     HashTable(int size) : tableSize(size), table(size, nullptr), locks(size) {}
 
@@ -62,7 +64,7 @@ public:
     }
 
     // Get the value associated with a key
-    int get(int key) {
+    std::pair<bool, int> get(int key) {
         int index = hashFunction(key);
 
         std::shared_lock<std::shared_mutex> lock(locks[index]);
@@ -71,16 +73,16 @@ public:
         Node* current = table[index];
         while (current != nullptr) {
             if (current->key == key) {
-                return current->value;
+                return std::make_pair(true, current->value);
             }
             current = current->next;
         }
 
-        return -1;  // Return -1 if the key is not found
+        return std::make_pair(false, -1);;  // Return -1 if the key is not found
     }
 
     // Delete an item from the hash table
-    void remove(int key) {
+    bool remove(int key) {
         int index = hashFunction(key);
 
         std::unique_lock<std::shared_mutex> lock(locks[index]);
@@ -97,35 +99,12 @@ public:
                     prev->next = current->next;
                 }
                 delete current;
-                return;
+                return true;
             }
 
             prev = current;
             current = current->next;
         }
+        return false;
     }
 };
-
-int main() {
-    HashTable hashTable(10);  // Create a hash table of size 10
-
-    // Insert items into the hash table
-    hashTable.insert(1, 10);
-    hashTable.insert(2, 20);
-    hashTable.insert(3, 30);
-    hashTable.insert(4, 40);
-    hashTable.insert(5, 50);
-    hashTable.insert(15, 60);
-
-    // Retrieve values from the hash table
-    std::cout << hashTable.get(1) << std::endl;  // Output: 10
-    std::cout << hashTable.get(3) << std::endl;  // Output: 30
-    std::cout << hashTable.get(5) << std::endl;  // Output: 50
-
-    // Delete an item from the hash table
-    hashTable.remove(3);
-
-    std::cout << hashTable.get(3) << std::endl;  // Output: -1 (key not found)
-    std::cout << hashTable.get(15) << std::endl;  // Output: -1 (key not found)
-    return 0;
-}
